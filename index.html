@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tích hợp ATGT vào giáo án</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap">
+<style>
+/* Mot cot hep, nen trang, mot mau nhan xanh; vang danh dau phan chen */
+:root{
+  --bg:#FFFFFF; --soft:#F5F7FA; --ink:#1A2433; --mute:#5E6B7D; --line:#E2E7EE;
+  --accent:#1F5FA8; --accent-ink:#FFFFFF; --ins:#B7791F; --ins-bg:#FFF7E6; --ok:#1B7F55; --warn:#B4412F;
+  --f:'Be Vietnam Pro','Segoe UI',Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161E; --soft:#19202B; --ink:#E6ECF4; --mute:#97A3B4; --line:#2A3443; --accent:#7DB2F0; --accent-ink:#11161E;
+  --ins:#E7B456; --ins-bg:#2C2414; --ok:#5CD39B; --warn:#FF8A78; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161E; --soft:#19202B; --ink:#E6ECF4; --mute:#97A3B4; --line:#2A3443; --accent:#7DB2F0; --accent-ink:#11161E;
+  --ins:#E7B456; --ins-bg:#2C2414; --ok:#5CD39B; --warn:#FF8A78; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f);font-size:15px;line-height:1.6}
+.wrap{max-width:820px;margin:0 auto;padding-block:28px 96px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:1.45rem;font-weight:700;margin:0;line-height:1.3}
+h2{font-size:1rem;font-weight:700;margin:0 0 10px;display:flex;align-items:baseline;gap:8px}
+h2 .n{color:var(--accent);font-size:.85rem}
+p{margin:0 0 .5em}
+a{color:var(--accent)}
+.sub{color:var(--mute);margin:4px 0 22px}
+.sec{border-top:1px solid var(--line);padding:20px 0}
+.mute{color:var(--mute);font-size:.88rem}
+.ok{color:var(--ok)} .warn{color:var(--warn)}
+.drop{display:flex;flex-direction:column;align-items:center;gap:6px;border:1.5px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;cursor:pointer;background:var(--soft)}
+.drop:hover,.drop.on{border-color:var(--accent)}
+.drop b{font-weight:600}
+.drop input{display:none}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+input[type=text],textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:40px}
+input:focus,textarea:focus,.btn:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.btn{font:600 .92rem var(--f);padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer;min-height:40px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.6;cursor:wait}
+.link{background:none;border:0;padding:0;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex-wrap:wrap}
+.seg button{font:600 .9rem var(--f);border:0;background:var(--bg);color:var(--ink);padding:8px 14px;cursor:pointer;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.seg button.off{color:var(--mute)}
+.seg small{font-weight:500;opacity:.85}
+.list{list-style:none;padding:0;margin:8px 0 0}
+.list li{padding:4px 0;font-size:.92rem}
+.item{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:10px}
+.chain{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chain span{font-size:.8rem;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.chain span.me{border-color:var(--accent);color:var(--accent);font-weight:600}
+.yc{display:grid;grid-template-columns:150px 1fr;gap:8px 12px;align-items:start;margin-top:10px}
+.yc label{font-size:.88rem;font-weight:600;padding-top:8px}
+.chk{display:flex;gap:8px;align-items:center;font-weight:600;cursor:pointer}
+.chk input{width:18px;height:18px;accent-color:var(--accent)}
+.flow{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.fr{display:grid;grid-template-columns:44px 1fr;gap:10px;align-items:center}
+.fr .m{text-align:right;font-weight:700;font-size:.85rem;color:var(--mute);font-variant-numeric:tabular-nums}
+.fr .b{border-radius:8px;padding:7px 12px;background:var(--soft);font-size:.92rem}
+.fr.i .m{color:var(--ins)}
+.fr.i .b{background:var(--ins-bg);border:1.5px dashed var(--ins)}
+.fr.x{opacity:.4}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden;display:flex;margin:12px 0 6px}
+.bar i{display:block;height:100%}
+.ins{border:1.5px solid var(--ins);border-radius:12px;margin-top:12px;overflow:hidden}
+.ins .hd{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 14px;background:var(--ins-bg)}
+.ins .bd{padding:12px 14px;display:grid;gap:10px}
+.ins .meta{display:flex;gap:18px;flex-wrap:wrap;font-size:.88rem}
+.ins .meta b{font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fl{font-size:.8rem;font-weight:600;color:var(--mute);margin-bottom:3px;display:block}
+.doc{border:1px solid var(--line);border-radius:10px;padding:14px 16px;max-height:460px;overflow:auto;font-size:.88rem;background:var(--bg)}
+.doc p{margin:0 0 3px}
+.doc table.dt{border-collapse:collapse;width:100%;margin:6px 0}
+.doc table.dt td{border:1px solid var(--line);padding:4px 8px;vertical-align:top}
+.doc .empty{height:.4em}
+.doc .add{background:var(--ins-bg);border-left:3px solid var(--ins);padding:6px 10px;margin:6px 0;border-radius:4px}
+.doc .add p{margin:0}
+.foot{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding-block:10px calc(10px + env(safe-area-inset-bottom,0px))}
+.foot .in{max-width:820px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:r .8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes r{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+@media (max-width:560px){.yc{grid-template-columns:1fr}.yc label{padding-top:0}.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Tích hợp an toàn giao thông vào giáo án</h1>
+  <p class="sub">Trường Tiểu học Thăng Bình</p>
+
+  <div id="up">
+    <label class="drop" id="drop"><input type="file" id="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      <b id="dropT">Chọn giáo án (.docx)</b><span class="mute" id="dropS">hoặc kéo file thả vào đây</span></label>
+    <div id="vd" class="row" style="margin-top:10px;gap:8px"></div>
+    <div id="key" style="margin-top:12px"></div>
+    <div class="row" style="margin-top:12px"><button class="btn pri" id="go" type="button">Phân tích giáo án</button><span id="msg" class="mute"></span></div>
+  </div>
+
+  <div id="out"></div>
+</div>
+<div class="foot" id="foot" hidden><div class="in">
+  <label class="chk" style="font-weight:500"><input type="checkbox" id="blue" checked> Tô xanh phần thêm</label>
+  <button class="btn pri" id="dl" type="button">Đồng ý và tải giáo án</button><span id="dmsg" class="mute"></span>
+</div></div>
+<script src="data.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="examples.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
