@@ -103,7 +103,10 @@ function api(path, opt) {
 function pickModel() {
   return api('models?pageSize=200').then(function (j) {
     var n = (j.models || []).filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0; }).map(function (m) { return m.name.replace(/^models\//, ''); });
-    for (var i = 0; i < PREF.length; i++) if (n.indexOf(PREF[i]) >= 0) return PREF[i];
+    var chain = PREF.filter(function (x) { return n.indexOf(x) >= 0; });
+    n.forEach(function (x) { if (/flash/.test(x) && !/preview|exp|image|tts|live|audio|embed/.test(x) && chain.indexOf(x) < 0) chain.push(x); });
+    put('atgt_gemini_models', JSON.stringify(chain.slice(0, 5)));
+    if (chain.length) return chain[0];
     var f = n.filter(function (x) { return /flash/.test(x) && !/preview|exp|image|tts|live|audio/.test(x); });
     if (f.length) return f[0]; if (n.length) return n[0];
     throw new Error('Không tìm thấy mô hình Gemini cho khóa này.');
@@ -151,41 +154,63 @@ function errMsg(st, m) {
   if (st >= 500) return 'Gemini đang bận. Thử lại sau ít phút.';
   return m;
 }
-function model() { var m = get(MODK); return m ? Promise.resolve(m) : pickModel().then(function (x) { put(MODK, x); return x; }); }
-/* Goi Gemini dang luong (hien tien do), giam muc suy nghi de nhanh hon */
-function gen(user, schema, onProg, noThink) {
-  return model().then(function (m) {
-    var cfg = { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 };
-    if (!noThink) cfg.thinkingConfig = { thinkingLevel: 'low' };
-    var body = JSON.stringify({ systemInstruction: { parts: [{ text: sys() }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig: cfg });
-    return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':streamGenerateContent?alt=sse', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': get(KEYK) }, body: body })
-      .then(function (r) {
-        if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { var e = new Error(errMsg(r.status, j.error && j.error.message)); e.status = r.status; e.raw = (j.error && j.error.message) || ''; throw e; });
-        var rd = r.body.getReader(), dec = new TextDecoder(), buf = '', text = '';
-        function pump() {
-          return rd.read().then(function (x) {
-            if (x.done) return text;
-            buf += dec.decode(x.value, { stream: true });
-            var ls = buf.split('\n'); buf = ls.pop();
-            ls.forEach(function (l) {
-              if (l.indexOf('data:') !== 0) return;
-              try { var j = JSON.parse(l.slice(5)); var c = j.candidates && j.candidates[0]; (c && c.content && c.content.parts || []).forEach(function (p) { if (p.text && !p.thought) text += p.text; }); } catch (e) {}
-            });
-            if (onProg) onProg(text.length);
-            return pump();
+function chain() {
+  var c = []; try { c = JSON.parse(get('atgt_gemini_models') || '[]'); } catch (e) {}
+  var m = get(MODK);
+  if (!c.length) return pickModel().then(function (x) { put(MODK, x); return chain(); });
+  if (m && c.indexOf(m) < 0) c.unshift(m);
+  if (m) c = [m].concat(c.filter(function (x) { return x !== m; }));
+  return Promise.resolve(c);
+}
+function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+/* Mot lan goi Gemini dang luong (hien tien do) */
+function once(m, user, schema, onProg, noThink) {
+  var cfg = { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 };
+  if (!noThink) cfg.thinkingConfig = { thinkingLevel: 'low' };
+  var body = JSON.stringify({ systemInstruction: { parts: [{ text: sys() }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig: cfg });
+  return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':streamGenerateContent?alt=sse', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': get(KEYK) }, body: body })
+    .then(function (r) {
+      if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { var raw = (j.error && j.error.message) || ''; var e = new Error(errMsg(r.status, raw)); e.status = r.status; e.raw = raw; throw e; });
+      var rd = r.body.getReader(), dec = new TextDecoder(), buf = '', text = '', fin = '';
+      function pump() {
+        return rd.read().then(function (x) {
+          if (x.done) return text;
+          buf += dec.decode(x.value, { stream: true });
+          var ls = buf.split('\n'); buf = ls.pop();
+          ls.forEach(function (l) {
+            if (l.indexOf('data:') !== 0) return;
+            try { var j = JSON.parse(l.slice(5)); var c = j.candidates && j.candidates[0]; if (c && c.finishReason) fin = c.finishReason; (c && c.content && c.content.parts || []).forEach(function (p) { if (p.text && !p.thought) text += p.text; }); } catch (e) {}
           });
-        }
-        return pump();
-      }, function () { throw new Error('Không kết nối được tới Gemini. Kiểm tra mạng.'); })
-      .catch(function (e) {
-        if (e.status === 404) put(MODK, '');
-        if (!noThink && e.status === 400 && /think/i.test(e.raw || '')) return gen(user, schema, onProg, true);
+          if (onProg) onProg(text.length, m);
+          return pump();
+        });
+      }
+      return pump();
+    }, function () { var e = new Error('Không kết nối được tới Gemini. Kiểm tra mạng.'); e.status = 0; throw e; })
+    .then(function (t) {
+      if (!t) { var e = new Error('Gemini không trả lời.'); e.status = 503; throw e; }
+      try { return JSON.parse(t); } catch (er) { var e2 = new Error('Kết quả bị cắt ngang.'); e2.status = 503; throw e2; }
+    });
+}
+/* Tu thu lai khi Gemini ban, roi chuyen sang mo hinh khac cua cung tai khoan */
+function gen(user, schema, onProg) {
+  return chain().then(function (ms) {
+    var tries = [];
+    ms.forEach(function (m, i) { tries.push({ m: m, w: 0 }); if (i === 0) tries.push({ m: m, w: 3000 }); });
+    var k = 0, noThink = {}, lastErr = null;
+    function next() {
+      if (k >= tries.length) { var e0 = lastErr || new Error('Gemini đang bận.'); if (e0.raw) e0.message += ' (Chi tiết: ' + e0.raw.slice(0, 140) + ')'; throw e0; }
+      var t = tries[k++];
+      if (onProg) onProg(0, t.m, k > 1);
+      return wait(t.w).then(function () { return once(t.m, user, schema, onProg, noThink[t.m]); }).catch(function (e) {
+        lastErr = e;
+        if (e.status === 400 && /think/i.test(e.raw || '') && !noThink[t.m]) { noThink[t.m] = 1; k--; return next(); }
+        if (e.status === 404) { if (t.m === get(MODK)) put(MODK, ''); return next(); }
+        if (e.status === 0 || e.status === 429 || e.status >= 500) return next();
         throw e;
       });
-  }).then(function (t) {
-    if (typeof t !== 'string') return t;
-    if (!t) throw new Error('Gemini không trả lời. Thử lại.');
-    try { return JSON.parse(t); } catch (e) { throw new Error('Kết quả không đọc được. Bấm phân tích lại.'); }
+    }
+    return next();
   });
 }
 function analyze(onProg) { return gen('KẾ HOẠCH BÀI DẠY:\n' + numbered(), SCHEMA, onProg).then(clean); }
@@ -468,9 +493,9 @@ $('go').onclick = function () {
   if (!get(KEYK)) { msg('Dán và lưu khóa Gemini trước.', true); return; }
   var bt = $('go'), t0 = Date.now(), n = 0;
   bt.disabled = true; bt.innerHTML = '<span class="spin"></span>Đang phân tích';
-  var tick = setInterval(function () { msg((n ? 'Đang nhận kết quả: ' + n + ' ký tự' : 'Gemini đang đọc giáo án') + ' · ' + Math.round((Date.now() - t0) / 1000) + ' giây'); }, 500);
+  var mm = '', sw = false, tick = setInterval(function () { msg((sw ? 'Gemini bận, đang thử lại với ' + mm + '. ' : '') + (n ? 'Đang nhận kết quả: ' + n + ' ký tự' : 'Gemini đang đọc giáo án') + ' · ' + Math.round((Date.now() - t0) / 1000) + ' giây'); }, 500);
   $('out').innerHTML = ''; $('foot').hidden = true;
-  analyze(function (k) { n = k; }).then(function (r) { clearInterval(tick); show(r); msg('Xong sau ' + Math.round((Date.now() - t0) / 1000) + ' giây.'); })
+  analyze(function (k, m, retry) { n = k; if (m) mm = m; if (retry) sw = true; }).then(function (r) { clearInterval(tick); show(r); msg('Xong sau ' + Math.round((Date.now() - t0) / 1000) + ' giây.'); })
     .catch(function (e) { clearInterval(tick); msg(e.message, true); })
     .then(function () { bt.disabled = false; bt.textContent = 'Phân tích lại'; });
 };
