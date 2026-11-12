@@ -139,7 +139,7 @@ function sys() {
     L.map(function (x) { return x.id + ' | Lớp ' + x.lop + ' Bài ' + x.bai + ': ' + x.ten + ' (trang ' + x.trang + '). Mục tiêu: ' + x.muctieu.join(' '); }).join('\n'),
     'ĐẦU RA:',
     '- Giáo án đánh số đoạn [số]. Mọi vị trí là số đoạn có thật. Nội dung chèn đặt NGAY SAU đoạn neo. trich_neo chép nguyên văn 5 - 12 chữ đầu đoạn neo.',
-    '- neo_ten_bai: đoạn chứa tên bài. neo_yccd: tiêu đề hoặc câu dẫn của phần yêu cầu cần đạt / mục tiêu ở đầu giáo án (phần yêu cầu cần đạt về ATGT sẽ chèn ngay sau đoạn này).',
+    '- neo_ten_bai: đoạn chứa tên bài. neo_yccd: đoạn CUỐI CÙNG của phần yêu cầu cần đạt / mục tiêu (ngay trước phần đồ dùng dạy học); phần yêu cầu cần đạt về ATGT sẽ chèn ngay sau đoạn này, ở cuối phần yêu cầu cần đạt.',
     '- yccd của mỗi phương án: thuc_hien = học sinh thực hiện được việc gì về ATGT; van_dung = vận dụng được gì vào giải quyết vấn đề ATGT trong thực tế; pham_chat = có cơ hội hình thành, phát triển phẩm chất gì liên quan. Mỗi mục 1 - 2 ý ngắn, bám mục tiêu bài ATGT đã chọn và nội dung bài học; mức độ tương xứng hình thức (liên hệ thì nhẹ nhất).',
     '- phuong_an: ghi đủ 3 hình thức với hinh_thuc, phu_hop, ly_do (một câu). CHỈ lập chi tiết (yccd, nguyen_tac, chen, dieu_chinh_thoi_gian) cho hình thức đề xuất; hai hình thức còn lại bỏ qua các trường chi tiết. Không phù hợp thì phu_hop = false, nêu lí do. Không ép toàn phần khi bài không chủ yếu về giao thông. Không có điểm chạm tự nhiên thì de_xuat.hinh_thuc = "khong".',
     '- chen: đặt vào đúng hoạt động phù hợp; nếu giáo án kẻ bảng hai cột thì neo vào đoạn ở cột hoạt động của giáo viên. gv, hs: mỗi phần tử một việc cụ thể, ngắn, hợp lứa tuổi. hoc_lieu: tranh, trò chơi trong tài liệu ATGT lớp mấy bài mấy, hoặc tranh SGK của bài.',
@@ -234,12 +234,22 @@ function cleanPlan(p) {
   p.loaded = p.chen.length > 0 || p.nguyen_tac.length > 0;
   return p;
 }
+/* Dua vi tri chen yeu cau can dat ATGT xuong cuoi phan yeu cau can dat (ngay truoc phan do dung / thiet bi) */
+function endYccd(i) {
+  if (i < 0) return i;
+  var NEXT = /^(ii|2|b)?[\s.)\-:]*(đồ dùng|thiết bị|chuẩn bị|phương tiện|teaching aids|materials|các hoạt động|hoạt động dạy học|tiến trình)/i;
+  for (var k = i + 1; k < S.paras.length && k < i + 80; k++) {
+    var p = S.paras[k]; if (p.skip || p.t >= 0 || !p.text) continue;
+    if (NEXT.test(p.text)) { for (var j = k - 1; j > i; j--) if (S.paras[j].text && !S.paras[j].skip) return j; return i; }
+  }
+  return i;
+}
 function clean(r) {
   r.bai_hoc = r.bai_hoc || {}; r.cac_hoat_dong = r.cac_hoat_dong || [];
   r.diem_giao = (r.diem_giao || []).filter(function (d) { return byId(d.ma_bai_atgt); });
   r.phuong_an = (r.phuong_an || []).filter(function (p) { return FN[p.hinh_thuc]; });
   r.phuong_an.forEach(cleanPlan);
-  r.bai_hoc.neo_ten_bai = clamp(r.bai_hoc.neo_ten_bai); r.bai_hoc.neo_yccd = clamp(r.bai_hoc.neo_yccd);
+  r.bai_hoc.neo_ten_bai = clamp(r.bai_hoc.neo_ten_bai); r.bai_hoc.neo_yccd = endYccd(clamp(r.bai_hoc.neo_yccd));
   return r;
 }
 
@@ -287,8 +297,8 @@ function drawPlan() {
   }
   if (!p || !p.phu_hop || !p.chen.length) { el.innerHTML = '<div class="sec"><p class="mute">Hình thức này không phù hợp với bài học nên không có nội dung chèn.</p></div>'; $('foot').hidden = true; return; }
   var h = '<div class="sec"><h2><span class="n">3</span>Yêu cầu cần đạt về ATGT</h2>' +
-    '<label class="chk"><input type="checkbox" id="ycOn"' + (on('yc') ? ' checked' : '') + '> Thêm vào phần yêu cầu cần đạt ở đầu giáo án</label>' +
-    '<p class="mute" style="margin:4px 0 0">Vị trí: ngay sau đoạn "' + esc(snip(S.r.bai_hoc.neo_yccd)) + '"</p>' +
+    '<label class="chk"><input type="checkbox" id="ycOn"' + (on('yc') ? ' checked' : '') + '> Thêm vào cuối phần yêu cầu cần đạt</label>' +
+    '<p class="mute" style="margin:4px 0 0">Vị trí: ngay sau đoạn "' + esc(snip(S.r.bai_hoc.neo_yccd)) + '" (cuối phần yêu cầu cần đạt)</p>' +
     '<div class="yc"><label for="y1">Học sinh thực hiện được</label><textarea id="y1" data-y="thuc_hien">' + esc(yv('thuc_hien')) + '</textarea>' +
     '<label for="y2">Vận dụng vào giải quyết vấn đề ATGT</label><textarea id="y2" data-y="van_dung">' + esc(yv('van_dung')) + '</textarea>' +
     '<label for="y3">Phẩm chất</label><textarea id="y3" data-y="pham_chat">' + esc(yv('pham_chat')) + '</textarea></div></div>';
@@ -337,11 +347,19 @@ function ycLines() {
   if (!on('yc')) return [];
   var o = [], a = lines(yv('thuc_hien')), b = lines(yv('van_dung')), c = lines(yv('pham_chat'));
   if (!a.length && !b.length && !c.length) return [];
-  o.push({ t: 'Yêu cầu cần đạt về giáo dục an toàn giao thông:', b: true });
+  o.push({ t: ycHead(), b: true });
   a.forEach(function (x) { o.push({ t: '- Thực hiện được: ' + x }); });
   b.forEach(function (x) { o.push({ t: '- Vận dụng: ' + x }); });
   c.forEach(function (x) { o.push({ t: '- Phẩm chất: ' + x }); });
   return o;
+}
+function ycHead() {
+  var p = plan(), mins = p.chen.reduce(function (a, c, i) { return a + (on(i) ? (+c.thoi_luong || 0) : 0); }, 0);
+  var ids = S.r.diem_giao.map(function (d) { return byId(d.ma_bai_atgt); }).filter(Boolean);
+  var g = {}; ids.forEach(function (x) { (g[x.lop] = g[x.lop] || []).indexOf(x.bai) < 0 && g[x.lop].push(x.bai); });
+  var tl = Object.keys(g).sort().map(function (l) { return 'lớp ' + l + ' bài ' + g[l].sort(function (m, n) { return m - n; }).join(', '); }).join('; ');
+  return 'Tích hợp an toàn giao thông (' + FN[S.form].toLowerCase() + (mins && S.form !== 'tp' ? ' - ' + mins + ' phút' : '') +
+    (tl ? '; Tài liệu giáo dục ATGT ' + tl : '') + ')';
 }
 function title() {
   var ids = S.r.diem_giao.map(function (d) { return byId(d.ma_bai_atgt); }).filter(Boolean);
@@ -369,7 +387,6 @@ function doc() {
   function addCell(tc, html) { if (!tc) return; var a = cellEnd.get(tc) || []; a.push(html); cellEnd.set(tc, a); }
   function box(inner) { return '<div class="add">' + inner + '</div>'; }
   function li(a) { return a.map(function (x) { return '<p>- ' + esc(x) + '</p>'; }).join(''); }
-  if (b.neo_ten_bai >= 0 && !hasTitle()) addAfter(b.neo_ten_bai, box('<p><i>' + esc(title()) + '</i></p>'));
   if (yl.length && b.neo_yccd >= 0) addAfter(b.neo_yccd, box(yl.map(function (l) { return '<p' + (l.b ? ' style="font-weight:600"' : '') + '>' + esc(l.t) + '</p>'; }).join('')));
   Object.keys(m).forEach(function (key) {
     m[key].forEach(function (i) {
@@ -459,7 +476,6 @@ function build() {
   });
   var yl = ycLines();
   if (yl.length && o[b.neo_yccd]) { var y = o[b.neo_yccd]; after(y, yl.map(function (l) { return mk(d, y, l.t, C({ b: l.b })); })); added += yl.length; }
-  if (o[b.neo_ten_bai] && !hasTitle()) { var tt = o[b.neo_ten_bai]; after(tt, [mk(d, tt, title(), C({ i: 1 }))]); added++; }
   var s0 = S.stat, s1 = count(d);
   var same = s0.tbl === s1.tbl && s0.tr === s1.tr && s0.tc === s1.tc && s0.img === s1.img && s0.sect === s1.sect && s1.p === s0.p + added;
   if (!same) return Promise.reject(new Error('cấu trúc giáo án bị thay đổi ngoài ý muốn, file chưa được tạo'));
