@@ -113,7 +113,7 @@ function pickModel() {
   });
 }
 var STR = { type: 'STRING' }, INT = { type: 'INTEGER' }, ARR = { type: 'ARRAY', items: { type: 'STRING' } };
-function obj(p) { return { type: 'OBJECT', properties: p, required: Object.keys(p) }; }
+function obj(p) { return { type: 'OBJECT', properties: p, required: Object.keys(p), propertyOrdering: Object.keys(p) }; }
 var SCHEMA = obj({
   bai_hoc: obj({ mon: STR, lop: INT, ten_bai: STR, thoi_luong_tiet: INT, neo_ten_bai: INT, neo_yccd: INT }),
   cac_hoat_dong: { type: 'ARRAY', items: obj({ ten: STR, thoi_luong: INT, doan_dau: INT, doan_cuoi: INT }) },
@@ -128,7 +128,7 @@ var SCHEMA = obj({
   }) }
 });
 var PLAN = SCHEMA.properties.phuong_an.items;
-SCHEMA.properties.phuong_an = { type: 'ARRAY', items: { type: 'OBJECT', properties: PLAN.properties, required: ['hinh_thuc', 'phu_hop', 'ly_do'] } };
+SCHEMA.properties.phuong_an = { type: 'ARRAY', items: obj({ hinh_thuc: PLAN.properties.hinh_thuc, phu_hop: PLAN.properties.phu_hop, ly_do: STR }) };
 function sys() {
   return [
     'Bạn hỗ trợ giáo viên tiểu học Việt Nam tích hợp giáo dục an toàn giao thông (ATGT) vào kế hoạch bài dạy có sẵn. Viết tiếng Việt, văn phong sư phạm, ngắn gọn, không dùng biểu tượng cảm xúc.',
@@ -141,7 +141,7 @@ function sys() {
     '- Giáo án đánh số đoạn [số]. Mọi vị trí là số đoạn có thật. Nội dung chèn đặt NGAY SAU đoạn neo. trich_neo chép nguyên văn 5 - 12 chữ đầu đoạn neo.',
     '- neo_ten_bai: đoạn chứa tên bài. neo_yccd: đoạn CUỐI CÙNG của phần yêu cầu cần đạt / mục tiêu (ngay trước phần đồ dùng dạy học); phần yêu cầu cần đạt về ATGT sẽ chèn ngay sau đoạn này, ở cuối phần yêu cầu cần đạt.',
     '- yccd của mỗi phương án: thuc_hien = học sinh thực hiện được việc gì về ATGT; van_dung = vận dụng được gì vào giải quyết vấn đề ATGT trong thực tế; pham_chat = có cơ hội hình thành, phát triển phẩm chất gì liên quan. Mỗi mục 1 - 2 ý ngắn, bám mục tiêu bài ATGT đã chọn và nội dung bài học; mức độ tương xứng hình thức (liên hệ thì nhẹ nhất).',
-    '- phuong_an: ghi đủ 3 hình thức với hinh_thuc, phu_hop, ly_do (một câu). CHỈ lập chi tiết (yccd, nguyen_tac, chen, dieu_chinh_thoi_gian) cho hình thức đề xuất; hai hình thức còn lại bỏ qua các trường chi tiết. Không phù hợp thì phu_hop = false, nêu lí do. Không ép toàn phần khi bài không chủ yếu về giao thông. Không có điểm chạm tự nhiên thì de_xuat.hinh_thuc = "khong".',
+    '- Khi phân tích tổng quan: phuong_an ghi đủ 3 hình thức với hinh_thuc, phu_hop, ly_do (một câu ngắn); viết ngắn gọn để trả lời nhanh. Khi được yêu cầu lập chi tiết một hình thức: trả về yccd, dieu_chinh_thoi_gian, nguyen_tac, chen. Không phù hợp thì phu_hop = false, nêu lí do. Không ép toàn phần khi bài không chủ yếu về giao thông. Không có điểm chạm tự nhiên thì de_xuat.hinh_thuc = "khong".',
     '- chen: đặt vào đúng hoạt động phù hợp; nếu giáo án kẻ bảng hai cột thì neo vào đoạn ở cột hoạt động của giáo viên. gv, hs: mỗi phần tử một việc cụ thể, ngắn, hợp lứa tuổi. hoc_lieu: tranh, trò chơi trong tài liệu ATGT lớp mấy bài mấy, hoặc tranh SGK của bài.',
     '- Tổng thời lượng sau tích hợp không vượt thời lượng tiết; nếu thêm thời gian, dieu_chinh_thoi_gian ghi rõ bớt bao nhiêu phút ở hoạt động nào.'
   ].join('\n');
@@ -163,15 +163,19 @@ function chain() {
   return Promise.resolve(c);
 }
 function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-/* Mot lan goi Gemini dang luong (hien tien do) */
-function once(m, user, schema, onProg, noThink) {
-  var cfg = { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.4 };
-  if (!noThink) cfg.thinkingConfig = { thinkingLevel: 'low' };
+/* Mot lan goi Gemini dang luong: bao tung phan (ket qua, suy nghi) de hien qua trinh */
+function once(m, user, schema, onEv, noThink, lim) {
+  var cfg = { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.3 };
+  if (!noThink) cfg.thinkingConfig = { thinkingLevel: 'low', includeThoughts: true };
   var body = JSON.stringify({ systemInstruction: { parts: [{ text: sys() }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig: cfg });
-  return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':streamGenerateContent?alt=sse', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': get(KEYK) }, body: body })
+  var ac = new AbortController(), got = false, why = '';
+  var t1 = setTimeout(function () { if (!got) { why = 'slow'; ac.abort(); } }, 30000);
+  var t2 = setTimeout(function () { why = 'long'; ac.abort(); }, lim || 110000);
+  function done() { clearTimeout(t1); clearTimeout(t2); }
+  return fetch('https://generativelanguage.googleapis.com/v1beta/models/' + m + ':streamGenerateContent?alt=sse', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': get(KEYK) }, body: body, signal: ac.signal })
     .then(function (r) {
       if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) { var raw = (j.error && j.error.message) || ''; var e = new Error(errMsg(r.status, raw)); e.status = r.status; e.raw = raw; throw e; });
-      var rd = r.body.getReader(), dec = new TextDecoder(), buf = '', text = '', fin = '';
+      var rd = r.body.getReader(), dec = new TextDecoder(), buf = '', text = '', th = '';
       function pump() {
         return rd.read().then(function (x) {
           if (x.done) return text;
@@ -179,30 +183,32 @@ function once(m, user, schema, onProg, noThink) {
           var ls = buf.split('\n'); buf = ls.pop();
           ls.forEach(function (l) {
             if (l.indexOf('data:') !== 0) return;
-            try { var j = JSON.parse(l.slice(5)); var c = j.candidates && j.candidates[0]; if (c && c.finishReason) fin = c.finishReason; (c && c.content && c.content.parts || []).forEach(function (p) { if (p.text && !p.thought) text += p.text; }); } catch (e) {}
+            try { var j = JSON.parse(l.slice(5)); var c = j.candidates && j.candidates[0]; (c && c.content && c.content.parts || []).forEach(function (p) { if (!p.text) return; got = true; if (p.thought) th += p.text; else text += p.text; }); } catch (e) {}
           });
-          if (onProg) onProg(text.length, m);
+          if (onEv) onEv({ text: text, thought: th, model: m });
           return pump();
         });
       }
       return pump();
-    }, function () { var e = new Error('Không kết nối được tới Gemini. Kiểm tra mạng.'); e.status = 0; throw e; })
+    }, function () {
+      var e = new Error(why ? 'Gemini phản hồi chậm.' : 'Không kết nối được tới Gemini. Kiểm tra mạng.'); e.status = why ? 504 : 0; throw e;
+    })
     .then(function (t) {
+      done();
       if (!t) { var e = new Error('Gemini không trả lời.'); e.status = 503; throw e; }
       try { return JSON.parse(t); } catch (er) { var e2 = new Error('Kết quả bị cắt ngang.'); e2.status = 503; throw e2; }
-    });
+    }, function (e) { done(); if (e.name === 'AbortError' || why) { var e3 = new Error('Gemini phản hồi chậm.'); e3.status = 504; throw e3; } throw e; });
 }
-/* Tu thu lai khi Gemini ban, roi chuyen sang mo hinh khac cua cung tai khoan */
-function gen(user, schema, onProg) {
+/* Tu thu lai khi Gemini ban hoac cham, roi chuyen sang mo hinh khac cua cung tai khoan */
+function gen(user, schema, onEv, lim) {
   return chain().then(function (ms) {
-    var tries = [];
-    ms.forEach(function (m, i) { tries.push({ m: m, w: 0 }); if (i === 0) tries.push({ m: m, w: 3000 }); });
+    var tries = ms.map(function (m) { return { m: m }; });
     var k = 0, noThink = {}, lastErr = null;
     function next() {
       if (k >= tries.length) { var e0 = lastErr || new Error('Gemini đang bận.'); if (e0.raw) e0.message += ' (Chi tiết: ' + e0.raw.slice(0, 140) + ')'; throw e0; }
       var t = tries[k++];
-      if (onProg) onProg(0, t.m, k > 1);
-      return wait(t.w).then(function () { return once(t.m, user, schema, onProg, noThink[t.m]); }).catch(function (e) {
+      if (onEv) onEv({ text: '', thought: '', model: t.m, retry: k > 1, start: true });
+      return once(t.m, user, schema, onEv, noThink[t.m], lim).catch(function (e) {
         lastErr = e;
         if (e.status === 400 && /think/i.test(e.raw || '') && !noThink[t.m]) { noThink[t.m] = 1; k--; return next(); }
         if (e.status === 404) { if (t.m === get(MODK)) put(MODK, ''); return next(); }
@@ -213,12 +219,57 @@ function gen(user, schema, onProg) {
     return next();
   });
 }
-function analyze(onProg) { return gen('KẾ HOẠCH BÀI DẠY:\n' + numbered(), SCHEMA, onProg).then(clean); }
-function planFor(f, onProg) {
+function analyze(onEv) { return gen('Phân tích tổng quan.\nKẾ HOẠCH BÀI DẠY:\n' + numbered(), SCHEMA, onEv).then(clean); }
+function planFor(f, onEv) {
   var r = S.r, ctx = { bai_hoc: r.bai_hoc, cac_hoat_dong: r.cac_hoat_dong, diem_giao: r.diem_giao };
-  return gen('KẾ HOẠCH BÀI DẠY:\n' + numbered() + '\n\nKẾT QUẢ ĐÃ PHÂN TÍCH: ' + JSON.stringify(ctx) + '\n\nHãy lập chi tiết đầy đủ (yccd, nguyen_tac, chen, dieu_chinh_thoi_gian) cho phương án hình thức "' + f + '" (' + FN[f] + '). Trả về một đối tượng phương án.', PLAN, onProg)
-    .then(function (p) { p.hinh_thuc = f; cleanPlan(p); for (var i = 0; i < r.phuong_an.length; i++) if (r.phuong_an[i].hinh_thuc === f) { p.ly_do = p.ly_do || r.phuong_an[i].ly_do; r.phuong_an[i] = p; } return p; });
+  return gen('KẾ HOẠCH BÀI DẠY:\n' + numbered() + '\n\nKẾT QUẢ ĐÃ PHÂN TÍCH: ' + JSON.stringify(ctx) + '\n\nHãy lập chi tiết (yccd, dieu_chinh_thoi_gian, nguyen_tac, chen) cho phương án hình thức "' + f + '" (' + FN[f] + '). Trả về một đối tượng phương án.', PLAN, onEv)
+    .then(function (p) { p.hinh_thuc = f; p.phu_hop = true; cleanPlan(p); for (var i = 0; i < r.phuong_an.length; i++) if (r.phuong_an[i].hinh_thuc === f) { p.ly_do = p.ly_do || r.phuong_an[i].ly_do; r.phuong_an[i] = p; } return p; });
 }
+
+/* ===== Bang tien trinh: the hien Gemini dang lam gi ===== */
+function Prog(box, title, steps) {
+  var t0 = Date.now(), st = { text: '', thought: '', model: '', retry: false, started: false }, fin = false;
+  function grab(re, txt) { var m = re.exec(txt); return m ? m[1] : ''; }
+  function all(re, txt) { var o = [], m; re.lastIndex = 0; while ((m = re.exec(txt))) o.push(m[1]); return o; }
+  function draw() {
+    var txt = st.text, cur = 1;
+    if (st.started) cur = 2;
+    steps.forEach(function (s, i) { if (i >= 2 && s.key && txt.indexOf('"' + s.key + '"') >= 0) cur = i; });
+    if (fin) cur = steps.length;
+    var sec = Math.round((Date.now() - t0) / 1000);
+    var th = st.thought.replace(/\*\*([^*]+)\*\*/g, '$1: ').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+    if (th.length > 260) th = '...' + th.slice(-260);
+    box.innerHTML = '<div class="prog"><div class="ph"><b>' + esc(title) + '</b><span class="mute">' + sec + ' giây</span></div>' +
+      (st.retry ? '<p class="warn" style="margin:6px 0 0;font-size:.88rem">Mô hình trước bận hoặc chậm, đã chuyển sang ' + esc(st.model) + '.</p>' : '') +
+      '<ol class="pst">' + steps.map(function (s, i) {
+        var cls = i < cur ? 'done' : i === cur ? 'now' : 'wait';
+        var det = typeof s.det === 'function' ? s.det(txt, grab, all, st) : (s.det || '');
+        return '<li class="' + cls + '"><span class="dot"></span><span class="lb">' + esc(s.label) + '</span>' + (det ? '<span class="dt">' + esc(det) + '</span>' : '') + '</li>';
+      }).join('') + '</ol>' +
+      (th && !fin ? '<div class="think"><span class="mute">Gemini đang suy nghĩ:</span> ' + esc(th) + '</div>' : '') +
+      (st.text && !fin ? '<p class="mute" style="margin:8px 0 0;font-size:.84rem">Đã nhận ' + st.text.length + ' ký tự kết quả</p>' : '') + '</div>';
+  }
+  var iv = setInterval(draw, 400); draw();
+  return {
+    ev: function (e) { if (e.start) { st.started = true; st.text = ''; st.thought = ''; if (e.retry) st.retry = true; } st.model = e.model || st.model; if (!e.start) { st.text = e.text; st.thought = e.thought; } },
+    end: function () { fin = true; clearInterval(iv); draw(); return Math.round((Date.now() - t0) / 1000); },
+    stop: function () { clearInterval(iv); }
+  };
+}
+var STEPS_A = [
+  { label: 'Đọc cấu trúc giáo án trên máy', det: function () { var s0 = S.stat || {}; return S.paras.filter(function (p) { return p.text; }).length + ' đoạn, ' + (s0.tbl || 0) + ' bảng, ' + (s0.img || 0) + ' hình ảnh'; } },
+  { label: 'Gửi giáo án tới Gemini', det: function (t, g, a, st) { return st.model; } },
+  { label: 'Gemini đọc giáo án, nhận diện bài học và các hoạt động', key: 'bai_hoc', det: function (t, g) { var x = g(/"ten_bai"\s*:\s*"([^"]+)"/, t); return x ? 'Bài học: ' + x : ''; } },
+  { label: 'Đối chiếu với 30 bài trong Tài liệu giáo dục ATGT', key: 'diem_giao', det: function (t, g, a) { return a(/"ma_bai_atgt"\s*:\s*"([^"]+)"/g, t).map(byId).filter(Boolean).map(function (x) { return 'Lớp ' + x.lop + ' bài ' + x.bai + ' ' + x.ten; }).join('; '); } },
+  { label: 'Chọn hình thức tích hợp phù hợp', key: 'de_xuat', det: function (t) { var i = t.indexOf('"de_xuat"'); if (i < 0) return ''; var m = /"hinh_thuc"\s*:\s*"(\w+)"/.exec(t.slice(i)); return m && FN[m[1]] ? 'Đề xuất: ' + FN[m[1]] : ''; } }
+];
+var STEPS_B = [
+  { label: 'Dùng kết quả phân tích bài học', det: '' },
+  { label: 'Gửi yêu cầu lập phương án tới Gemini', det: function (t, g, a, st) { return st.model; } },
+  { label: 'Viết yêu cầu cần đạt về ATGT', key: 'yccd' },
+  { label: 'Kiểm tra 6 nguyên tắc tích hợp', key: 'nguyen_tac' },
+  { label: 'Thiết kế hoạt động tích hợp: vị trí, nội dung, thời lượng, hoạt động giáo viên và học sinh', key: 'chen', det: function (t, g, a) { var i = t.indexOf('"chen"'); if (i < 0) return ''; return a(/"ten"\s*:\s*"([^"]+)"/g, t.slice(i)).join('; '); } }
+];
 function clamp(n) { n = parseInt(n, 10); return isNaN(n) ? -1 : Math.max(0, Math.min(S.paras.length - 1, n)); }
 function nm(s) { return String(s || '').toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim(); }
 function fix(i, q) {
@@ -285,14 +336,19 @@ function drawPlan() {
     (p.phu_hop && (p.nguyen_tac || []).length ? '<ul class="list">' + p.nguyen_tac.slice(0, 6).map(function (n, i) {
       return '<li><span class="' + (n.dat ? 'ok' : 'warn') + '">' + (n.dat ? 'Đạt' : 'Lưu ý') + '</span> · ' + NGT[i] + '. <span class="mute">' + esc(n.giai_thich) + '</span></li>'; }).join('') + '</ul>' : '') : '';
   if (p && p.phu_hop && !p.loaded) {
-    el.innerHTML = '<div class="sec"><p>Phương án ' + FN[p.hinh_thuc].toLowerCase() + ' chưa được lập chi tiết.</p><div class="row"><button class="btn pri" id="mk" type="button">Lập phương án ' + FN[p.hinh_thuc].toLowerCase() + '</button><span id="mkm" class="mute"></span></div></div>';
     $('foot').hidden = true;
-    $('mk').onclick = function () {
-      var bt = this, f = p.hinh_thuc, t0 = Date.now(), n = 0, tick = setInterval(function () { $('mkm').textContent = 'Đang lập... ' + Math.round((Date.now() - t0) / 1000) + ' giây' + (n ? ' · đã nhận ' + n + ' ký tự' : ''); }, 500);
-      bt.disabled = true;
-      planFor(f, function (k) { n = k; }).then(function () { clearInterval(tick); if (S.form === f) drawPlan(); })
-        .catch(function (e) { clearInterval(tick); bt.disabled = false; $('mkm').innerHTML = '<span class="warn">' + esc(e.message) + '</span>'; });
+    var f = p.hinh_thuc;
+    var run = function () {
+      p._run = true;
+      el.innerHTML = '<div class="sec" id="pbox"></div>';
+      var pg = Prog($('pbox'), 'Gemini đang lập phương án ' + FN[f].toLowerCase(), STEPS_B);
+      planFor(f, pg.ev).then(function () { pg.end(); if (S.form === f) drawPlan(); })
+        .catch(function (e) { pg.stop(); p._run = false; el.innerHTML = '<div class="sec"><p class="warn">' + esc(e.message) + '</p><button class="btn pri" id="mk" type="button">Thử lại</button></div>'; $('mk').onclick = run; });
     };
+    if (p._run) { el.innerHTML = '<div class="sec"><p class="mute">Đang lập phương án ' + FN[f].toLowerCase() + '...</p></div>'; return; }
+    if (S.r.de_xuat && S.r.de_xuat.hinh_thuc === f && !p._auto) { p._auto = true; run(); return; }
+    el.innerHTML = '<div class="sec"><p>Phương án ' + FN[f].toLowerCase() + ' chưa được lập chi tiết.</p><button class="btn pri" id="mk" type="button">Lập phương án ' + FN[f].toLowerCase() + '</button></div>';
+    $('mk').onclick = run;
     return;
   }
   if (!p || !p.phu_hop || !p.chen.length) { el.innerHTML = '<div class="sec"><p class="mute">Hình thức này không phù hợp với bài học nên không có nội dung chèn.</p></div>'; $('foot').hidden = true; return; }
@@ -453,8 +509,8 @@ function toCell(d, tc, texts) {
   texts.forEach(function (x) { var p = mk(d, tmpl, x.t, x.o); var last = tc.lastChild; while (last && last.nodeType !== 1) last = last.previousSibling; tc.appendChild(p); n++; });
   return n;
 }
-function build() {
-  var blue = $('blue').checked, d = new DOMParser().parseFromString(S.xmlStr, 'application/xml'), b = S.r.bai_hoc, m = at(), o = allP(d), added = 0;
+function buildXml(blue) {
+  var d = new DOMParser().parseFromString(S.xmlStr, 'application/xml'), b = S.r.bai_hoc, m = at(), o = allP(d), added = 0;
   var C = function (x) { return { c: blue, b: x && x.b, i: x && x.i }; };
   Object.keys(m).forEach(function (key) {
     var a = o[+key], last = a;
@@ -478,17 +534,170 @@ function build() {
   if (yl.length && o[b.neo_yccd]) { var y = o[b.neo_yccd]; after(y, yl.map(function (l) { return mk(d, y, l.t, C({ b: l.b })); })); added += yl.length; }
   var s0 = S.stat, s1 = count(d);
   var same = s0.tbl === s1.tbl && s0.tr === s1.tr && s0.tc === s1.tc && s0.img === s1.img && s0.sect === s1.sect && s1.p === s0.p + added;
-  if (!same) return Promise.reject(new Error('cấu trúc giáo án bị thay đổi ngoài ý muốn, file chưa được tạo'));
-  return JSZip.loadAsync(S.buf).then(function (z) {
+  if (!same) throw new Error('cấu trúc giáo án bị thay đổi ngoài ý muốn, file chưa được tạo');
+  return { d: d, added: added, s0: s0 };
+}
+var DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+function pack(buf, d) {
+  return JSZip.loadAsync(buf).then(function (z) {
     z.file('word/document.xml', new XMLSerializer().serializeToString(d));
-    return z.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
-  }).then(function (bl) {
-    var n = (S.name || 'Giao an') + ' - tich hop ATGT.docx', a2 = document.createElement('a');
-    a2.href = URL.createObjectURL(bl); a2.download = n; document.body.appendChild(a2); a2.click();
-    setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 1500);
+    return z.generateAsync({ type: 'blob', mimeType: DOCX, compression: 'DEFLATE' });
+  });
+}
+function save(bl, n) {
+  var a2 = document.createElement('a'); a2.href = URL.createObjectURL(bl); a2.download = n; document.body.appendChild(a2); a2.click();
+  setTimeout(function () { URL.revokeObjectURL(a2.href); a2.remove(); }, 4000);
+}
+function build() {
+  var x; try { x = buildXml($('blue').checked); } catch (e) { return Promise.reject(e); }
+  var s0 = x.s0, added = x.added;
+  return pack(S.buf, x.d).then(function (bl) {
+    var n = (S.name || 'Giao an') + ' - tich hop ATGT.docx'; save(bl, n);
     $('dmsg').textContent = 'Đã tải: ' + n + '. Giữ nguyên ' + s0.tbl + ' bảng, ' + s0.tc + ' ô, ' + s0.img + ' hình ảnh; chỉ thêm ' + added + ' đoạn tích hợp.';
   });
 }
+
+/* ===== Nhieu giao an: tu dong phan tich, chen va xuat file, khong can duyet ===== */
+var ONE = obj({ bai_hoc: SCHEMA.properties.bai_hoc, cac_hoat_dong: SCHEMA.properties.cac_hoat_dong, diem_giao: SCHEMA.properties.diem_giao, de_xuat: SCHEMA.properties.de_xuat, chi_tiet: PLAN });
+var CK = ['paras', 'zip', 'xml', 'buf', 'xmlStr', 'roles', 'idx', 'stat', '_els', 'name', 'r', 'form', 'acc', 'ed'];
+var MAXF = 10, PAR = 3;
+var B = { files: [], run: false, out: [] };
+/* Doi tam du lieu S sang giao an dang xu li (chi chay dong bo nen khong lan giua cac file) */
+function withCtx(c, fn) {
+  var keep = {}; CK.forEach(function (k) { keep[k] = S[k]; S[k] = c[k]; });
+  try { return fn(); } finally { CK.forEach(function (k) { c[k] = S[k]; S[k] = keep[k]; }); }
+}
+function snap() { var c = {}; CK.forEach(function (k) { c[k] = S[k]; }); return c; }
+function oneUser() {
+  return 'Xử lí tự động: phân tích và lập chi tiết luôn trong một lần trả lời.\n' +
+    'bai_hoc, cac_hoat_dong, diem_giao, de_xuat: như khi phân tích tổng quan.\n' +
+    'chi_tiet: phương án chi tiết (hinh_thuc, phu_hop, ly_do, yccd, dieu_chinh_thoi_gian, nguyen_tac, chen) cho đúng hình thức đã chọn ở de_xuat. Nếu de_xuat là "khong" thì chi_tiet.chen để rỗng.\n' +
+    'KẾ HOẠCH BÀI DẠY:\n' + numbered();
+}
+function fromOne(raw) {
+  var dx = raw.de_xuat || {}, ct = raw.chi_tiet;
+  raw.phuong_an = dx.hinh_thuc && dx.hinh_thuc !== 'khong' && ct ? [Object.assign(ct, { hinh_thuc: dx.hinh_thuc, phu_hop: true, ly_do: ct.ly_do || dx.ly_do })] : [];
+  delete raw.chi_tiet;
+  return clean(raw);
+}
+function tlOf(r) {
+  var ids = (r.diem_giao || []).map(function (d) { return byId(d.ma_bai_atgt); }).filter(Boolean);
+  return ids.map(function (x) { return 'lớp ' + x.lop + ' bài ' + x.bai; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(', ');
+}
+function bRow(i) { return $('br' + i); }
+function bSet(i, st, cls) { var el = bRow(i); if (!el) return; el.querySelector('.bs').innerHTML = st; el.className = 'bi' + (cls ? ' ' + cls : ''); }
+function bStage(t) {
+  var k = [['chen', 'Thiết kế hoạt động tích hợp'], ['nguyen_tac', 'Kiểm tra 6 nguyên tắc'], ['yccd', 'Viết yêu cầu cần đạt ATGT'], ['chi_tiet', 'Lập phương án chi tiết'], ['de_xuat', 'Chọn hình thức tích hợp'], ['diem_giao', 'Đối chiếu Tài liệu giáo dục ATGT'], ['bai_hoc', 'Nhận diện bài học']];
+  for (var i = 0; i < k.length; i++) if (t.indexOf('"' + k[i][0] + '"') >= 0) return k[i][1];
+  return 'Gemini đang đọc giáo án';
+}
+function bDraw() {
+  var box = $('blist'); if (!box) return;
+  if (!B.files.length) { box.innerHTML = ''; $('bhint').textContent = ''; return; }
+  box.innerHTML = B.files.map(function (f, i) {
+    return '<li class="bi" id="br' + i + '"><div class="bm"><b class="bn">' + esc(f.name) + '</b><span class="bs mute">' + (f.bad ? '<span class="warn">' + esc(f.bad) + '</span>' : 'Chờ xử lí') + '</span></div><span class="ba"></span></li>';
+  }).join('');
+  var nOk = B.files.filter(function (f) { return !f.bad; }).length; $('bhint').textContent = nOk + ' giáo án' + (B.files.length >= MAXF ? ' (đã đủ tối đa ' + MAXF + ' file)' : '');
+}
+function bAdd(list) {
+  if (B.run) return;
+  if (B.out.length) { B.files = []; B.out = []; $('bres').innerHTML = ''; }
+  Array.prototype.forEach.call(list || [], function (f) {
+    if (B.files.length >= MAXF) return;
+    if (B.files.some(function (x) { return x.name === f.name && x.size === f.size; })) return;
+    B.files.push({ file: f, name: f.name, size: f.size, bad: /\.docx$/i.test(f.name) ? '' : 'Chỉ nhận .docx (mở bằng Word, Lưu thành .docx)' });
+  });
+  bDraw();
+}
+function bMsg(t, bad) { $('bmsg').innerHTML = bad ? '<span class="warn">' + esc(t) + '</span>' : esc(t); }
+function uniq(n, used) { var b = n, k = 2; while (used[n]) n = b.replace(/\.docx$/, '') + ' (' + (k++) + ').docx'; used[n] = 1; return n; }
+function runOne(f, i, blue) {
+  var c = f.ctx, t0 = Date.now(), raw;
+  var tick = function (e) { var t = (e && e.text) || ''; bSet(i, '<span class="spin"></span>' + esc(bStage(t)) + (t ? ' · đã nhận ' + t.length + ' ký tự' : '') + (e && e.model ? ' <span class="mute">(' + esc(e.model) + ')</span>' : '')); };
+  bSet(i, '<span class="spin"></span>Gửi tới Gemini');
+  var user = withCtx(c, oneUser);
+  var call = window.__MOCK_ONE ? window.__MOCK_ONE(f.name, tick) : gen(user, ONE, tick, 150000);
+  var again = function (e) { if (window.__MOCK_ONE || !(e.status === 0 || e.status === 429 || e.status >= 500)) throw e; bSet(i, '<span class="spin"></span>Gemini bận, thử lại sau 20 giây'); return wait(20000).then(function () { return gen(user, ONE, tick, 150000); }); };
+  return call.catch(again).then(function (j) {
+    raw = j;
+    var res = withCtx(c, function () {
+      S.r = fromOne(raw); S.acc = {}; S.ed = {};
+      var p = S.r.phuong_an[0];
+      if (!p || (!p.chen.length && !p.yccd.thuc_hien.length)) return { skip: (S.r.de_xuat && S.r.de_xuat.ly_do) || 'Không có điểm giao tự nhiên với nội dung ATGT.' };
+      S.form = p.hinh_thuc;
+      var x = buildXml(blue), mins = p.chen.reduce(function (a, q) { return a + (+q.thoi_luong || 0); }, 0);
+      return { x: x, form: p.hinh_thuc, n: p.chen.length, mins: mins, ten: S.r.bai_hoc.ten_bai || '', tl: tlOf(S.r) };
+    });
+    if (res.skip) { bSet(i, '<span class="warn">Giữ nguyên, không tích hợp:</span> ' + esc(res.skip), 'skip'); return null; }
+    return pack(c.buf, res.x.d).then(function (bl) {
+      var sec = Math.round((Date.now() - t0) / 1000), n = c.name + ' - tich hop ATGT.docx';
+      var o = { i: i, bl: bl, n: n }; B.out.push(o);
+      bSet(i, '<span class="ok">Xong</span> · ' + esc(FN[res.form]) + (res.form !== 'tp' && res.mins ? ' ' + res.mins + ' phút' : '') + ' · ' + res.n + ' hoạt động tích hợp' + (res.tl ? ' · Tài liệu ATGT ' + esc(res.tl) : '') + ' · ' + sec + ' giây' + (res.ten ? '<br><span class="mute">' + esc(res.ten) + '</span>' : ''), 'done');
+      var a = bRow(i).querySelector('.ba'); a.innerHTML = '<button class="btn" type="button" style="min-height:34px;padding:5px 12px">Tải</button>';
+      a.firstChild.onclick = function () { if (window.__PREVIEW) { bMsg('Bản xem trước không tải file được.'); return; } save(bl, o.n); };
+      return o;
+    });
+  }).catch(function (e) { bSet(i, '<span class="warn">Lỗi: ' + esc(e.message) + '</span>', 'err'); return null; });
+}
+function runBatch() {
+  if (B.run) return;
+  var ok = B.files.filter(function (f) { return !f.bad; });
+  if (!ok.length) { bMsg('Chọn các file giáo án .docx trước.', true); return; }
+  if (!window.__MOCK_ONE && !get(KEYK)) { bMsg('Dán và lưu khóa Gemini trước.', true); return; }
+  var blue = $('bblue').checked, bt = $('bgo'), t0 = Date.now(), keep = snap(), done = 0, used = {};
+  B.run = true; B.out = []; bt.disabled = true; bt.innerHTML = '<span class="spin"></span>Đang tạo giáo án'; bMsg(''); $('bres').innerHTML = ''; bDraw();
+  var total = ok.length;
+  var iv = setInterval(function () { $('bprog').innerHTML = '<div class="bar"><i style="width:' + Math.round(done / total * 100) + '%;background:var(--accent)"></i></div><span class="mute">Đã xong ' + done + '/' + total + ' · ' + Math.round((Date.now() - t0) / 1000) + ' giây</span>'; }, 500);
+  /* Doc lan luot tung file tren may, giu rieng du lieu cua moi file */
+  var rd = Promise.resolve();
+  B.files.forEach(function (f, i) {
+    if (f.bad) return;
+    rd = rd.then(function () {
+      bSet(i, '<span class="spin"></span>Đọc file trên máy');
+      return readDocx(f.file).then(function () { S.name = f.name.replace(/\.docx$/i, ''); f.ctx = snap(); bSet(i, 'Đã đọc ' + S.paras.filter(function (p) { return p.text; }).length + ' đoạn, ' + S.stat.tbl + ' bảng, ' + S.stat.img + ' hình ảnh · chờ Gemini'); })
+        .catch(function (e) { f.ctx = null; bSet(i, '<span class="warn">' + esc(e.message) + '</span>', 'err'); });
+    });
+  });
+  return rd.then(function () {
+    CK.forEach(function (k) { S[k] = keep[k]; });
+    var q = B.files.map(function (f, i) { return i; }).filter(function (i) { return B.files[i].ctx && !B.files[i].bad; });
+    total = q.length || 1;
+    if (!q.length) return;
+    function worker() { if (!q.length) return Promise.resolve(); var i = q.shift(); return runOne(B.files[i], i, blue).then(function () { done++; return worker(); }); }
+    var ws = [], nw = Math.min(PAR, q.length); for (var w = 0; w < nw; w++) ws.push(worker());
+    return Promise.all(ws);
+  }).then(function () {
+    clearInterval(iv);
+    var sec = Math.round((Date.now() - t0) / 1000), out = B.out.slice().sort(function (a, b) { return a.i - b.i; });
+    $('bprog').innerHTML = '<div class="bar"><i style="width:100%;background:var(' + (out.length ? '--ok' : '--warn') + ')"></i></div><span class="mute">Hoàn thành sau ' + sec + ' giây · tạo được ' + out.length + '/' + ok.length + ' giáo án</span>';
+    if (!out.length) { bMsg('Chưa tạo được giáo án nào. Xem lí do ở từng dòng.', true); return; }
+    var z = new JSZip(); out.forEach(function (o) { z.file(uniq(o.n, used), o.bl); });
+    var zn = 'Giao an tich hop ATGT (' + out.length + ' bai).zip';
+    return z.generateAsync({ type: 'blob', compression: 'STORE' }).then(function (zb) {
+      $('bres').innerHTML = '<button class="btn pri" id="bzip" type="button">Tải tất cả (.zip)</button> <span class="mute">' + esc(zn) + '</span>';
+      var get1 = function () { if (window.__PREVIEW) { bMsg('Bản xem trước không tải file được; bản đăng chính thức tự tải về file .zip chứa các giáo án đã tích hợp.'); return; } save(zb, zn); };
+      $('bzip').onclick = get1;
+      get1();
+      if (!window.__PREVIEW) bMsg('Đã tự động tải ' + zn + '. Nếu trình duyệt chặn, bấm "Tải tất cả" hoặc nút Tải ở từng giáo án.');
+    });
+  }).catch(function (e) { clearInterval(iv); bMsg(e.message, true); })
+    .then(function () { CK.forEach(function (k) { S[k] = keep[k]; }); B.run = false; bt.disabled = false; bt.textContent = 'Tạo giáo án tích hợp'; });
+}
+function setMode(m) {
+  $('mode').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.m === m); });
+  $('one').hidden = m !== 'one'; $('many').hidden = m !== 'many';
+  $('foot').hidden = m !== 'one' || !S.r || !(plan() && plan().loaded);
+  try { localStorage.setItem('atgt_mode', m); } catch (e) {}
+}
+$('mode').querySelectorAll('button').forEach(function (b) { b.onclick = function () { setMode(b.dataset.m); }; });
+$('bfile').onchange = function (e) { bAdd(e.target.files); e.target.value = ''; };
+var bz = $('bdrop');
+['dragenter', 'dragover'].forEach(function (ev) { bz.addEventListener(ev, function (e) { e.preventDefault(); bz.classList.add('on'); }); });
+['dragleave', 'drop'].forEach(function (ev) { bz.addEventListener(ev, function (e) { e.preventDefault(); bz.classList.remove('on'); }); });
+bz.addEventListener('drop', function (e) { bAdd(e.dataTransfer.files); });
+$('bclr').onclick = function () { if (B.run) return; B.files = []; B.out = []; $('bres').innerHTML = ''; $('bprog').innerHTML = ''; bMsg(''); bDraw(); };
+$('bgo').onclick = runBatch;
+(function () { var m = ''; try { m = localStorage.getItem('atgt_mode') || ''; } catch (e) {} if (m === 'many') setMode('many'); })();
 
 /* ===== Khoi dong ===== */
 function msg(t, bad) { $('msg').innerHTML = bad ? '<span class="warn">' + esc(t) + '</span>' : esc(t); }
@@ -507,12 +716,12 @@ dz.addEventListener('drop', function (e) { load(e.dataTransfer.files[0]); });
 $('go').onclick = function () {
   if (!S.paras.length) { msg('Chọn file giáo án trước.', true); return; }
   if (!get(KEYK)) { msg('Dán và lưu khóa Gemini trước.', true); return; }
-  var bt = $('go'), t0 = Date.now(), n = 0;
-  bt.disabled = true; bt.innerHTML = '<span class="spin"></span>Đang phân tích';
-  var mm = '', sw = false, tick = setInterval(function () { msg((sw ? 'Gemini bận, đang thử lại với ' + mm + '. ' : '') + (n ? 'Đang nhận kết quả: ' + n + ' ký tự' : 'Gemini đang đọc giáo án') + ' · ' + Math.round((Date.now() - t0) / 1000) + ' giây'); }, 500);
-  $('out').innerHTML = ''; $('foot').hidden = true;
-  analyze(function (k, m, retry) { n = k; if (m) mm = m; if (retry) sw = true; }).then(function (r) { clearInterval(tick); show(r); msg('Xong sau ' + Math.round((Date.now() - t0) / 1000) + ' giây.'); })
-    .catch(function (e) { clearInterval(tick); msg(e.message, true); })
+  var bt = $('go');
+  bt.disabled = true; bt.innerHTML = '<span class="spin"></span>Đang phân tích'; msg('');
+  $('out').innerHTML = '<div class="sec" id="pbox"></div>'; $('foot').hidden = true;
+  var pg = Prog($('pbox'), 'Gemini đang phân tích giáo án', STEPS_A);
+  analyze(pg.ev).then(function (r) { var sec = pg.end(); show(r); msg('Phân tích xong sau ' + sec + ' giây.'); })
+    .catch(function (e) { pg.stop(); $('out').innerHTML = ''; msg(e.message, true); })
     .then(function () { bt.disabled = false; bt.textContent = 'Phân tích lại'; });
 };
 $('dl').onclick = function () { build().catch(function (e) { $('dmsg').textContent = 'Không tạo được file: ' + e.message; }); };
@@ -534,7 +743,7 @@ function examples() {
       .catch(function (er) { msg(er.message, true); });
   }; });
 }
-window.ATGT = { S: S, show: show, readDocx: readDocx };
+window.ATGT = { Prog: Prog, STEPS_A: STEPS_A, S: S, show: show, readDocx: readDocx, B: B, bAdd: bAdd, runBatch: runBatch, setMode: setMode };
 examples();
 drawKey();
 })();

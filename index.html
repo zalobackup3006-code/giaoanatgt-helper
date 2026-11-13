@@ -85,9 +85,32 @@ input:focus,textarea:focus,.btn:focus-visible,.seg button:focus-visible{outline:
 .doc .add p{margin:0}
 .foot{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding-block:10px calc(10px + env(safe-area-inset-bottom,0px))}
 .foot .in{max-width:820px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.prog{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--soft)}
+.prog .ph{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.pst{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:9px}
+.pst li{display:grid;grid-template-columns:18px 1fr;column-gap:10px;align-items:start;font-size:.93rem}
+.pst .dot{width:14px;height:14px;border-radius:50%;margin-top:4px;border:2px solid var(--line);box-sizing:border-box}
+.pst li.done .dot{background:var(--ok);border-color:var(--ok)}
+.pst li.now .dot{border-color:var(--accent);border-right-color:transparent;animation:r .9s linear infinite}
+.pst li.wait{color:var(--mute)}
+.pst li.now .lb{font-weight:600}
+.pst .dt{grid-column:2;font-size:.84rem;color:var(--mute)}
+.think{margin-top:12px;font-size:.86rem;font-style:italic;line-height:1.5;border-left:3px solid var(--accent);padding:4px 0 4px 10px}
+@media (prefers-reduced-motion:reduce){.pst li.now .dot{animation:none;background:var(--accent)}}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:r .8s linear infinite;vertical-align:-2px;margin-right:6px}
 @keyframes r{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
+.blist{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:8px}
+.bi{display:flex;gap:12px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+.bi .bm{display:flex;flex-direction:column;min-width:0}
+.bi .bn{font-weight:600;overflow-wrap:anywhere}
+.bi .bs{font-size:.86rem}
+.bi.done{border-color:var(--ok)}
+.bi.err{border-color:var(--warn)}
+.bi.skip{border-style:dashed}
+#mode{display:grid;grid-template-columns:1fr 1fr;width:100%;max-width:460px}
+#mode button{border-right:1px solid var(--line)}
+#mode button:last-child{border-right:0}
 @media (max-width:560px){.yc{grid-template-columns:1fr}.yc label{padding-top:0}.two{grid-template-columns:1fr}}
 </style>
 </head>
@@ -96,15 +119,35 @@ input:focus,textarea:focus,.btn:focus-visible,.seg button:focus-visible{outline:
   <h1>Tích hợp an toàn giao thông vào giáo án</h1>
   <p class="sub">Trường Tiểu học Thăng Bình</p>
 
+  <div id="key" style="margin-bottom:14px"></div>
+  <div class="seg" id="mode" style="margin-bottom:14px"><button type="button" data-m="one" class="on">Một giáo án <small>xem và duyệt</small></button><button type="button" data-m="many">Nhiều giáo án <small>tự động</small></button></div>
+
+  <div id="one">
   <div id="up">
     <label class="drop" id="drop"><input type="file" id="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
       <b id="dropT">Chọn giáo án (.docx)</b><span class="mute" id="dropS">hoặc kéo file thả vào đây</span></label>
     <div id="vd" class="row" style="margin-top:10px;gap:8px"></div>
-    <div id="key" style="margin-top:12px"></div>
     <div class="row" style="margin-top:12px"><button class="btn pri" id="go" type="button">Phân tích giáo án</button><span id="msg" class="mute"></span></div>
   </div>
 
   <div id="out"></div>
+  </div>
+
+  <div id="many" hidden>
+    <label class="drop" id="bdrop"><input type="file" id="bfile" multiple accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      <b>Chọn nhiều giáo án (.docx)</b><span class="mute">chọn cùng lúc tối đa 10 file, hoặc kéo thả vào đây; mỗi file một bài dạy</span></label>
+    <ul class="blist" id="blist"></ul>
+    <div class="row" style="margin-top:12px">
+      <button class="btn pri" id="bgo" type="button">Tạo giáo án tích hợp</button>
+      <label class="chk" style="font-weight:500"><input type="checkbox" id="bblue" checked> Tô xanh phần thêm</label>
+      <button class="link" id="bclr" type="button">Xóa danh sách</button>
+      <span id="bhint" class="mute"></span>
+    </div>
+    <p class="mute" style="margin:8px 0 0">Hệ thống tự chọn hình thức tích hợp đề xuất, tự chèn nội dung và tự tải về file .zip chứa các giáo án đã tích hợp, giữ nguyên bảng, hình ảnh và định dạng của từng giáo án.</p>
+    <div id="bprog" style="margin-top:12px"></div>
+    <div id="bres" class="row" style="margin-top:10px"></div>
+    <p id="bmsg" class="mute" style="margin-top:8px"></p>
+  </div>
 </div>
 <div class="foot" id="foot" hidden><div class="in">
   <label class="chk" style="font-weight:500"><input type="checkbox" id="blue" checked> Tô xanh phần thêm</label>
