@@ -561,21 +561,26 @@ function build() {
 var ONE = obj({ bai_hoc: SCHEMA.properties.bai_hoc, cac_hoat_dong: SCHEMA.properties.cac_hoat_dong, diem_giao: SCHEMA.properties.diem_giao, de_xuat: SCHEMA.properties.de_xuat, chi_tiet: PLAN });
 var CK = ['paras', 'zip', 'xml', 'buf', 'xmlStr', 'roles', 'idx', 'stat', '_els', 'name', 'r', 'form', 'acc', 'ed'];
 var MAXF = 10, PAR = 3;
-var B = { files: [], run: false, out: [] };
+var B = { files: [], run: false, out: [], form: '' };
 /* Doi tam du lieu S sang giao an dang xu li (chi chay dong bo nen khong lan giua cac file) */
 function withCtx(c, fn) {
   var keep = {}; CK.forEach(function (k) { keep[k] = S[k]; S[k] = c[k]; });
   try { return fn(); } finally { CK.forEach(function (k) { c[k] = S[k]; S[k] = keep[k]; }); }
 }
 function snap() { var c = {}; CK.forEach(function (k) { c[k] = S[k]; }); return c; }
-function oneUser() {
+function oneUser(form) {
+  if (FN[form] && form !== 'khong') return 'Xử lí tự động: phân tích và lập chi tiết luôn trong một lần trả lời. Giáo viên đã chọn trước hình thức ' + FN[form].toUpperCase() + ' (' + form + ') cho tất cả các bài.\n' +
+    'bai_hoc, cac_hoat_dong, diem_giao, de_xuat: như khi phân tích tổng quan (de_xuat là đánh giá riêng của hệ thống, vẫn ghi trung thực).\n' +
+    'chi_tiet: BẮT BUỘC lập theo hình thức ' + FN[form].toLowerCase() + ' (hinh_thuc = "' + form + '"), gồm phu_hop, ly_do, yccd, dieu_chinh_thoi_gian, nguyen_tac, chen, đúng đặc điểm, thời lượng của hình thức này. Nếu bài chưa thật phù hợp với hình thức này thì vẫn lập ở mức hợp lí nhất, phu_hop = false và ly_do nêu ngắn điều giáo viên cần lưu ý. Chỉ để chen rỗng khi bài hoàn toàn không có điểm chạm nào với ATGT.\n' +
+    'KẾ HOẠCH BÀI DẠY:\n' + numbered();
   return 'Xử lí tự động: phân tích và lập chi tiết luôn trong một lần trả lời.\n' +
     'bai_hoc, cac_hoat_dong, diem_giao, de_xuat: như khi phân tích tổng quan.\n' +
     'chi_tiet: phương án chi tiết (hinh_thuc, phu_hop, ly_do, yccd, dieu_chinh_thoi_gian, nguyen_tac, chen) cho đúng hình thức đã chọn ở de_xuat. Nếu de_xuat là "khong" thì chi_tiet.chen để rỗng.\n' +
     'KẾ HOẠCH BÀI DẠY:\n' + numbered();
 }
-function fromOne(raw) {
-  var dx = raw.de_xuat || {}, ct = raw.chi_tiet;
+function fromOne(raw, form) {
+  var dx = raw.de_xuat || {}, ct = raw.chi_tiet, fx = FN[form] && form !== 'khong';
+  if (fx && ct) { raw.phuong_an = [Object.assign(ct, { hinh_thuc: form, luu_y: ct.phu_hop === false ? (ct.ly_do || 'Hình thức này chưa thật phù hợp với bài.') : '', phu_hop: true })]; delete raw.chi_tiet; return clean(raw); }
   raw.phuong_an = dx.hinh_thuc && dx.hinh_thuc !== 'khong' && ct ? [Object.assign(ct, { hinh_thuc: dx.hinh_thuc, phu_hop: true, ly_do: ct.ly_do || dx.ly_do })] : [];
   delete raw.chi_tiet;
   return clean(raw);
@@ -601,6 +606,7 @@ function bDraw() {
 }
 function bAdd(list) {
   if (B.run) return;
+  B.ok = false; if ($('bcf')) $('bcf').innerHTML = '';
   if (B.out.length) { B.files = []; B.out = []; $('bres').innerHTML = ''; }
   Array.prototype.forEach.call(list || [], function (f) {
     if (B.files.length >= MAXF) return;
@@ -611,28 +617,28 @@ function bAdd(list) {
 }
 function bMsg(t, bad) { $('bmsg').innerHTML = bad ? '<span class="warn">' + esc(t) + '</span>' : esc(t); }
 function uniq(n, used) { var b = n, k = 2; while (used[n]) n = b.replace(/\.docx$/, '') + ' (' + (k++) + ').docx'; used[n] = 1; return n; }
-function runOne(f, i, blue) {
+function runOne(f, i, blue, form) {
   var c = f.ctx, t0 = Date.now(), raw;
   var tick = function (e) { var t = (e && e.text) || ''; bSet(i, '<span class="spin"></span>' + esc(bStage(t)) + (t ? ' · đã nhận ' + t.length + ' ký tự' : '') + (e && e.model ? ' <span class="mute">(' + esc(e.model) + ')</span>' : '')); };
   bSet(i, '<span class="spin"></span>Gửi tới Gemini');
-  var user = withCtx(c, oneUser);
-  var call = window.__MOCK_ONE ? window.__MOCK_ONE(f.name, tick) : gen(user, ONE, tick, 150000);
+  var user = withCtx(c, function () { return oneUser(form); });
+  var call = window.__MOCK_ONE ? window.__MOCK_ONE(f.name, tick, form) : gen(user, ONE, tick, 150000);
   var again = function (e) { if (window.__MOCK_ONE || !(e.status === 0 || e.status === 429 || e.status >= 500)) throw e; bSet(i, '<span class="spin"></span>Gemini bận, thử lại sau 20 giây'); return wait(20000).then(function () { return gen(user, ONE, tick, 150000); }); };
   return call.catch(again).then(function (j) {
     raw = j;
     var res = withCtx(c, function () {
-      S.r = fromOne(raw); S.acc = {}; S.ed = {};
+      S.r = fromOne(raw, form); S.acc = {}; S.ed = {};
       var p = S.r.phuong_an[0];
       if (!p || (!p.chen.length && !p.yccd.thuc_hien.length)) return { skip: (S.r.de_xuat && S.r.de_xuat.ly_do) || 'Không có điểm giao tự nhiên với nội dung ATGT.' };
       S.form = p.hinh_thuc;
       var x = buildXml(blue), mins = p.chen.reduce(function (a, q) { return a + (+q.thoi_luong || 0); }, 0);
-      return { x: x, form: p.hinh_thuc, n: p.chen.length, mins: mins, ten: S.r.bai_hoc.ten_bai || '', tl: tlOf(S.r) };
+      return { x: x, form: p.hinh_thuc, n: p.chen.length, mins: mins, ten: S.r.bai_hoc.ten_bai || '', tl: tlOf(S.r), lu: p.luu_y || '' };
     });
     if (res.skip) { bSet(i, '<span class="warn">Giữ nguyên, không tích hợp:</span> ' + esc(res.skip), 'skip'); return null; }
     return pack(c.buf, res.x.d).then(function (bl) {
       var sec = Math.round((Date.now() - t0) / 1000), n = c.name + ' - tich hop ATGT.docx';
       var o = { i: i, bl: bl, n: n }; B.out.push(o);
-      bSet(i, '<span class="ok">Xong</span> · ' + esc(FN[res.form]) + (res.form !== 'tp' && res.mins ? ' ' + res.mins + ' phút' : '') + ' · ' + res.n + ' hoạt động tích hợp' + (res.tl ? ' · Tài liệu ATGT ' + esc(res.tl) : '') + ' · ' + sec + ' giây' + (res.ten ? '<br><span class="mute">' + esc(res.ten) + '</span>' : ''), 'done');
+      bSet(i, '<span class="ok">Xong</span> · ' + esc(FN[res.form]) + (res.form !== 'tp' && res.mins ? ' ' + res.mins + ' phút' : '') + ' · ' + res.n + ' hoạt động tích hợp' + (res.tl ? ' · Tài liệu ATGT ' + esc(res.tl) : '') + ' · ' + sec + ' giây' + (res.ten ? '<br><span class="mute">' + esc(res.ten) + '</span>' : '') + (res.lu ? '<br><span class="warn">Lưu ý: ' + esc(res.lu) + '</span>' : ''), 'done');
       var a = bRow(i).querySelector('.ba'); a.innerHTML = '<button class="btn" type="button" style="min-height:34px;padding:5px 12px">Tải</button>';
       a.firstChild.onclick = function () { if (window.__PREVIEW) { bMsg('Bản xem trước không tải file được.'); return; } save(bl, o.n); };
       return o;
@@ -644,6 +650,10 @@ function runBatch() {
   var ok = B.files.filter(function (f) { return !f.bad; });
   if (!ok.length) { bMsg('Chọn các file giáo án .docx trước.', true); return; }
   if (!window.__MOCK_ONE && !get(KEYK)) { bMsg('Dán và lưu khóa Gemini trước.', true); return; }
+  if (!B.form) { bMsg('Chọn hình thức tích hợp cho cả loạt trước.', true); $('bform').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (!B.ok) { bConfirm(ok.length); return; }
+  B.ok = false; $('bcf').innerHTML = '';
+  var form = B.form;
   var blue = $('bblue').checked, bt = $('bgo'), t0 = Date.now(), keep = snap(), done = 0, used = {};
   B.run = true; B.out = []; bt.disabled = true; bt.innerHTML = '<span class="spin"></span>Đang tạo giáo án'; bMsg(''); $('bres').innerHTML = ''; bDraw();
   var total = ok.length;
@@ -663,7 +673,7 @@ function runBatch() {
     var q = B.files.map(function (f, i) { return i; }).filter(function (i) { return B.files[i].ctx && !B.files[i].bad; });
     total = q.length || 1;
     if (!q.length) return;
-    function worker() { if (!q.length) return Promise.resolve(); var i = q.shift(); return runOne(B.files[i], i, blue).then(function () { done++; return worker(); }); }
+    function worker() { if (!q.length) return Promise.resolve(); var i = q.shift(); return runOne(B.files[i], i, blue, form).then(function () { done++; return worker(); }); }
     var ws = [], nw = Math.min(PAR, q.length); for (var w = 0; w < nw; w++) ws.push(worker());
     return Promise.all(ws);
   }).then(function () {
@@ -672,7 +682,7 @@ function runBatch() {
     $('bprog').innerHTML = '<div class="bar"><i style="width:100%;background:var(' + (out.length ? '--ok' : '--warn') + ')"></i></div><span class="mute">Hoàn thành sau ' + sec + ' giây · tạo được ' + out.length + '/' + ok.length + ' giáo án</span>';
     if (!out.length) { bMsg('Chưa tạo được giáo án nào. Xem lí do ở từng dòng.', true); return; }
     var z = new JSZip(); out.forEach(function (o) { z.file(uniq(o.n, used), o.bl); });
-    var zn = 'Giao an tich hop ATGT (' + out.length + ' bai).zip';
+    var zn = 'Giao an tich hop ATGT' + (FORMN[form] ? ' - ' + FORMN[form] : '') + ' (' + out.length + ' bai).zip';
     return z.generateAsync({ type: 'blob', compression: 'STORE' }).then(function (zb) {
       $('bres').innerHTML = '<button class="btn pri" id="bzip" type="button">Tải tất cả (.zip)</button> <span class="mute">' + esc(zn) + '</span>';
       var get1 = function () { if (window.__PREVIEW) { bMsg('Bản xem trước không tải file được; bản đăng chính thức tự tải về file .zip chứa các giáo án đã tích hợp.'); return; } save(zb, zn); };
@@ -683,6 +693,25 @@ function runBatch() {
   }).catch(function (e) { clearInterval(iv); bMsg(e.message, true); })
     .then(function () { CK.forEach(function (k) { S[k] = keep[k]; }); B.run = false; bt.disabled = false; bt.textContent = 'Tạo giáo án tích hợp'; });
 }
+var FORMN = { lh: 'lien he', bp: 'bo phan', tp: 'toan phan' };
+var FD = { lh: 'Ngắn 1 - 3 phút, 1 - 2 chỗ trong bài', bp: 'Một hoạt động hoặc bài tập trọn vẹn, 5 - 10 phút', tp: 'Xuyên suốt các hoạt động, cho bài chủ yếu về giao thông', auto: 'Hệ thống chọn riêng cho từng bài' };
+function bForm() {
+  var box = $('bform'); if (!box) return;
+  box.innerHTML = ['lh', 'bp', 'tp', 'auto'].map(function (k) {
+    return '<button type="button" data-f="' + k + '" class="' + (B.form === k ? 'on' : '') + '"><b>' + (k === 'auto' ? 'Tự chọn theo bài' : FN[k]) + '</b><small>' + FD[k] + '</small></button>';
+  }).join('');
+  box.querySelectorAll('button').forEach(function (b) { b.onclick = function () { if (B.run) return; B.form = b.dataset.f; B.ok = false; $('bcf').innerHTML = ''; bMsg(''); bForm(); }; });
+}
+/* Xac nhan mot lan truoc khi chay tu dong */
+function bConfirm(n) {
+  var f = B.form, t = f === 'auto' ? 'mỗi bài theo hình thức hệ thống đề xuất' : 'tất cả theo hình thức <b>' + FN[f].toLowerCase() + '</b> (' + esc(FD[f].charAt(0).toLowerCase() + FD[f].slice(1)) + ')';
+  $('bcf').innerHTML = '<div class="item" style="border-color:var(--accent)"><p style="margin:0 0 10px">Tạo ' + n + ' giáo án tích hợp ATGT, ' + t + '. Hệ thống sẽ tự chèn nội dung và tự tải về, không dừng lại để duyệt.</p>' +
+    '<div class="row"><button class="btn pri" id="bYes" type="button">Xác nhận và bắt đầu</button><button class="btn" id="bNo" type="button">Chọn lại</button></div></div>';
+  $('bYes').onclick = function () { B.ok = true; runBatch(); };
+  $('bNo').onclick = function () { $('bcf').innerHTML = ''; $('bform').scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+  $('bcf').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+bForm();
 function setMode(m) {
   $('mode').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.m === m); });
   $('one').hidden = m !== 'one'; $('many').hidden = m !== 'many';
@@ -695,7 +724,7 @@ var bz = $('bdrop');
 ['dragenter', 'dragover'].forEach(function (ev) { bz.addEventListener(ev, function (e) { e.preventDefault(); bz.classList.add('on'); }); });
 ['dragleave', 'drop'].forEach(function (ev) { bz.addEventListener(ev, function (e) { e.preventDefault(); bz.classList.remove('on'); }); });
 bz.addEventListener('drop', function (e) { bAdd(e.dataTransfer.files); });
-$('bclr').onclick = function () { if (B.run) return; B.files = []; B.out = []; $('bres').innerHTML = ''; $('bprog').innerHTML = ''; bMsg(''); bDraw(); };
+$('bclr').onclick = function () { if (B.run) return; B.files = []; B.out = []; B.ok = false; $('bcf').innerHTML = ''; $('bres').innerHTML = ''; $('bprog').innerHTML = ''; bMsg(''); bDraw(); };
 $('bgo').onclick = runBatch;
 (function () { var m = ''; try { m = localStorage.getItem('atgt_mode') || ''; } catch (e) {} if (m === 'many') setMode('many'); })();
 

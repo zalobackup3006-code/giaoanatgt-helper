@@ -108,6 +108,14 @@ input:focus,textarea:focus,.btn:focus-visible,.seg button:focus-visible{outline:
 .bi.done{border-color:var(--ok)}
 .bi.err{border-color:var(--warn)}
 .bi.skip{border-style:dashed}
+.fopt{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.fopt button{display:flex;flex-direction:column;gap:2px;text-align:left;font:inherit;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;min-height:44px}
+.fopt button b{font-weight:600}
+.fopt button small{font-size:.8rem;color:var(--mute);line-height:1.4}
+.fopt button.on{border-color:var(--accent);background:var(--soft);box-shadow:inset 0 0 0 1px var(--accent)}
+.fopt button.on b{color:var(--accent)}
+.fopt button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media (max-width:640px){.fopt{grid-template-columns:1fr 1fr}}
 #mode{display:grid;grid-template-columns:1fr 1fr;width:100%;max-width:460px}
 #mode button{border-right:1px solid var(--line)}
 #mode button:last-child{border-right:0}
@@ -137,13 +145,16 @@ input:focus,textarea:focus,.btn:focus-visible,.seg button:focus-visible{outline:
     <label class="drop" id="bdrop"><input type="file" id="bfile" multiple accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
       <b>Chọn nhiều giáo án (.docx)</b><span class="mute">chọn cùng lúc tối đa 10 file, hoặc kéo thả vào đây; mỗi file một bài dạy</span></label>
     <ul class="blist" id="blist"></ul>
-    <div class="row" style="margin-top:12px">
+    <h2 style="margin:18px 0 8px">Hình thức tích hợp cho cả loạt</h2>
+    <div class="fopt" id="bform"></div>
+    <div class="row" style="margin-top:14px">
       <button class="btn pri" id="bgo" type="button">Tạo giáo án tích hợp</button>
       <label class="chk" style="font-weight:500"><input type="checkbox" id="bblue" checked> Tô xanh phần thêm</label>
       <button class="link" id="bclr" type="button">Xóa danh sách</button>
       <span id="bhint" class="mute"></span>
     </div>
-    <p class="mute" style="margin:8px 0 0">Hệ thống tự chọn hình thức tích hợp đề xuất, tự chèn nội dung và tự tải về file .zip chứa các giáo án đã tích hợp, giữ nguyên bảng, hình ảnh và định dạng của từng giáo án.</p>
+    <p class="mute" style="margin:8px 0 0">Chọn hình thức một lần, xác nhận, rồi hệ thống tự chèn nội dung và tự tải về file .zip chứa các giáo án đã tích hợp, giữ nguyên bảng, hình ảnh và định dạng của từng giáo án.</p>
+    <div id="bcf" style="margin-top:12px"></div>
     <div id="bprog" style="margin-top:12px"></div>
     <div id="bres" class="row" style="margin-top:10px"></div>
     <p id="bmsg" class="mute" style="margin-top:8px"></p>
